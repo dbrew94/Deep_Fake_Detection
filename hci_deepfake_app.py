@@ -8,18 +8,49 @@ Prototype graphical user interface implementing:
   - Real-time detection with confidence visualization
 """
 
+# web_app.py
+"""
+HCI Deepfake Detection — Streamlit Web Application
+Fully cloud-safe version with graceful fallbacks.
+
+Deploy: streamlit run web_app.py
+"""
+
 import streamlit as st
-import torch
-import torchvision.transforms as transforms
 import numpy as np
 import time
 import os
 import sys
 import tempfile
-from PIL import Image
+
+# ---- Safe imports ----
+try:
+    import torch
+    import torchvision.transforms as transforms
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
 
 # ==============================================================
-# PAGE CONFIG — must be first Streamlit call
+# PAGE CONFIG
 # ==============================================================
 
 st.set_page_config(
@@ -30,66 +61,37 @@ st.set_page_config(
 )
 
 # ==============================================================
-# CUSTOM CSS
+# CSS
 # ==============================================================
 
 st.markdown("""
 <style>
-    .main { background-color: #F0F4F8; }
-    .stApp { background-color: #F0F4F8; }
-
-    .result-box {
-        padding: 20px;
-        border-radius: 12px;
-        text-align: center;
-        margin: 10px 0;
-    }
     .result-fake {
-        background-color: #FFEBEE;
-        border: 2px solid #B71C1C;
+        padding:20px; border-radius:12px;
+        background:#FFEBEE; border:2px solid #B71C1C;
+        text-align:center; margin:10px 0;
     }
     .result-real {
-        background-color: #E8F5E9;
-        border: 2px solid #1B5E20;
+        padding:20px; border-radius:12px;
+        background:#E8F5E9; border:2px solid #1B5E20;
+        text-align:center; margin:10px 0;
     }
     .result-pending {
-        background-color: #F5F5F5;
-        border: 2px solid #9E9E9E;
-    }
-    .metric-card {
-        background-color: white;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #E0E0E0;
-        text-align: center;
-        margin: 5px;
-    }
-    .frame-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        margin-top: 10px;
-    }
-    h1 {
-        color: #1A1A2E;
-        font-family: serif;
+        padding:20px; border-radius:12px;
+        background:#F5F5F5; border:2px solid #9E9E9E;
+        text-align:center; margin:10px 0;
     }
     .stButton > button {
-        background-color: #1565C0;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 10px 24px;
-        font-size: 16px;
-        font-weight: bold;
-        width: 100%;
+        background-color:#1565C0; color:white;
+        border-radius:8px; border:none;
+        padding:10px 24px; font-size:16px;
+        font-weight:bold; width:100%;
     }
     .stButton > button:hover {
-        background-color: #0D47A1;
+        background-color:#0D47A1;
     }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ==============================================================
 # CONSTANTS
@@ -99,15 +101,6 @@ FRAME_RATES = [5, 10, 15, 20]
 IMG_SIZE    = 224
 MODEL_PATH  = 'models/cnn_lstm_best.pth'
 
-TRANSFORM = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    )
-])
-
 FRAME_GUIDE = {
     5:  ('4.8ms',  '0.694', 'Fast — lower accuracy'),
     10: ('9.6ms',  '0.727', 'Balanced — good accuracy'),
@@ -115,28 +108,60 @@ FRAME_GUIDE = {
     20: ('18.8ms', '0.731', 'Thorough — diminishing returns'),
 }
 
+if TORCH_AVAILABLE:
+    TRANSFORM = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+    ])
+else:
+    TRANSFORM = None
+
 
 # ==============================================================
-# MODEL LOADING (cached so it only loads once)
+# MODEL LOADING
 # ==============================================================
 
 @st.cache_resource
 def load_model():
     """
     Load CNN+LSTM model.
-    Cached by Streamlit so it persists across reruns.
-    Returns model and device.
+    Returns (model, device, loaded_bool, status_msg).
     """
-    device = torch.device(
-        'cuda' if torch.cuda.is_available() else 'cpu'
-    )
+    if not TORCH_AVAILABLE:
+        return (None, None, False,
+                "PyTorch not available — running in demo mode")
+
+    device = torch.device('cpu')
 
     try:
         sys.path.insert(
-            0,
-            os.path.dirname(os.path.abspath(__file__))
+            0, os.path.dirname(os.path.abspath(__file__))
         )
         from src.model import CNNLSTMModel
+    except ImportError as e:
+        return (None, device, False,
+                f"Could not import model: {e}")
+
+    # Download from Hugging Face if not present locally
+    if not os.path.exists(MODEL_PATH):
+        try:
+            from huggingface_hub import hf_hub_download
+            os.makedirs('models', exist_ok=True)
+            hf_hub_download(
+                repo_id='YOUR_HF_USERNAME/deepfake-detection',
+                filename='cnn_lstm_best.pth',
+                local_dir='models'
+            )
+        except Exception as e:
+            return (None, device, False,
+                    f"Model not found and download failed: {e}\n"
+                    f"Running in demo mode.")
+
+    try:
         model = CNNLSTMModel(
             sequence_length=10,
             hidden_size=256,
@@ -144,491 +169,517 @@ def load_model():
             bidirectional=True
         ).to(device)
 
-        if os.path.exists(MODEL_PATH):
-            state = torch.load(
-                MODEL_PATH, map_location=device
-            )
-            model.load_state_dict(state)
-            model.eval()
-            return model, device, True
-        else:
-            return None, device, False
+        state = torch.load(
+            MODEL_PATH, map_location=device
+        )
+        model.load_state_dict(state)
+        model.eval()
+        return (model, device, True, "Model loaded — CPU")
 
     except Exception as e:
-        return None, device, False
+        return (None, device, False,
+                f"Model load error: {e}")
 
 
 # ==============================================================
-# VIDEO PROCESSING
+# FRAME EXTRACTION
 # ==============================================================
 
-def extract_frames(video_path, num_frames):
+def extract_frames_from_upload(uploaded_file, num_frames):
     """
-    Extract evenly spaced frames from a video file.
-    Returns list of PIL Images.
+    Extract frames from a Streamlit uploaded file.
+    Saves to temp file then extracts with OpenCV.
+    Returns (frames_list, metadata_dict) or (None, None).
     """
+    if not CV2_AVAILABLE:
+        return None, None
+
+    if not PIL_AVAILABLE:
+        return None, None
+
+    # Write to temp file
+    suffix = os.path.splitext(
+        uploaded_file.name
+    )[-1] or '.mp4'
+
+    with tempfile.NamedTemporaryFile(
+        delete=False, suffix=suffix
+    ) as tmp:
+        tmp.write(uploaded_file.read())
+        tmp_path = tmp.name
+
     try:
-        import cv2
-    except ImportError:
-        st.error(
-            "OpenCV not installed. "
-            "Run: pip install opencv-python-headless"
-        )
-        return None
+        cap = cv2.VideoCapture(tmp_path)
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return None
+        if not cap.isOpened():
+            return None, None
 
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps   = cap.get(cv2.CAP_PROP_FPS)
-    w     = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h     = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps   = cap.get(cv2.CAP_PROP_FPS)
+        w     = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h     = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    if total < num_frames:
-        num_frames = max(1, total)
+        if total < 1:
+            return None, None
 
-    indices = [
-        int(k * total / num_frames)
-        for k in range(num_frames)
-    ]
+        actual_frames = min(num_frames, total)
+        indices = [
+            int(k * total / actual_frames)
+            for k in range(actual_frames)
+        ]
 
-    frames = []
-    meta   = {
-        'fps':        round(fps, 2),
-        'resolution': f'{w} x {h}',
-        'total_frames': total,
-        'duration_s': round(total / fps, 2)
-                      if fps > 0 else 'N/A',
-        'file_size_mb': round(
-            os.path.getsize(video_path) / (1024*1024), 2
-        )
-    }
+        frames = []
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if ret:
+                rgb = cv2.cvtColor(
+                    frame, cv2.COLOR_BGR2RGB
+                )
+                frames.append(Image.fromarray(rgb))
 
-    for idx in indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-        ret, frame = cap.read()
-        if ret:
-            frame_rgb = cv2.cvtColor(
-                frame, cv2.COLOR_BGR2RGB
+        cap.release()
+
+        meta = {
+            'fps':          round(fps, 2),
+            'resolution':   f'{w} x {h}',
+            'total_frames': total,
+            'duration_s':   round(total / fps, 2)
+                            if fps > 0 else 'N/A',
+            'file_size_mb': round(
+                uploaded_file.size / (1024 * 1024), 2
             )
-            frames.append(Image.fromarray(frame_rgb))
+        }
 
-    cap.release()
-    return frames, meta
+        return frames if frames else None, meta
 
+    except Exception as e:
+        st.error(f"Frame extraction error: {e}")
+        return None, None
 
-def build_metadata_vector(compression, source):
-    """Build 7-dim metadata vector."""
-    comp_map = {'raw': 0, 'c23': 1, 'c40': 2}
-    src_map  = {'youtube': 0, 'actors': 1}
-    comp_vec = [0.0, 0.0, 0.0]
-    src_vec  = [0.0, 0.0]
-    comp_vec[comp_map.get(compression, 1)] = 1.0
-    src_vec[src_map.get(source, 0)]        = 1.0
-    return comp_vec + src_vec + [0.5, 0.5]
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
-def run_inference(model, frames, device, T):
-    """Run deepfake detection on extracted frames."""
-    if model is None:
-        # Demo mode with random result
-        time.sleep(0.5)
-        conf  = float(np.random.uniform(0.25, 0.95))
+# ==============================================================
+# INFERENCE
+# ==============================================================
+
+def run_inference(model, device, frames, T):
+    """
+    Run detection. Falls back to demo mode
+    if model is None or torch unavailable.
+    """
+    if model is None or not TORCH_AVAILABLE:
+        time.sleep(0.8)
+        conf  = float(np.random.uniform(0.20, 0.95))
         label = 'FAKE' if conf > 0.5 else 'REAL'
-        return label, conf, 15.0
+        return label, conf, 0.0, True
 
-    while len(frames) < T:
-        frames.append(frames[-1])
-    frames = frames[:T]
+    try:
+        # Pad or trim sequence
+        while len(frames) < T:
+            frames.append(frames[-1])
+        frames = frames[:T]
 
-    tensors = [TRANSFORM(f) for f in frames]
-    seq     = torch.stack(tensors).unsqueeze(0).to(device)
+        tensors = [TRANSFORM(f) for f in frames]
+        seq     = torch.stack(tensors).unsqueeze(0).to(device)
 
-    if device.type == 'cuda':
-        start_ev = torch.cuda.Event(enable_timing=True)
-        end_ev   = torch.cuda.Event(enable_timing=True)
-        start_ev.record()
-        with torch.no_grad():
-            logits = model(seq)
-        end_ev.record()
-        torch.cuda.synchronize()
-        latency = start_ev.elapsed_time(end_ev)
-    else:
         t0 = time.perf_counter()
         with torch.no_grad():
             logits = model(seq)
         latency = (time.perf_counter() - t0) * 1000.0
 
-    probs     = torch.softmax(logits, dim=1)
-    fake_prob = float(probs[0, 1].cpu())
-    label     = 'FAKE' if fake_prob > 0.5 else 'REAL'
-    return label, fake_prob, latency
+        probs     = torch.softmax(logits, dim=1)
+        fake_prob = float(probs[0, 1].cpu())
+        label     = 'FAKE' if fake_prob > 0.5 else 'REAL'
+        return label, fake_prob, latency, False
+
+    except Exception as e:
+        st.error(f"Inference error: {e}")
+        conf  = float(np.random.uniform(0.2, 0.9))
+        label = 'FAKE' if conf > 0.5 else 'REAL'
+        return label, conf, 0.0, True
 
 
 # ==============================================================
-# MAIN APP LAYOUT
+# SIDEBAR
+# ==============================================================
+
+def build_sidebar():
+    """Build the sidebar controls. Returns config dict."""
+    with st.sidebar:
+        st.markdown("## ⚙️ Configuration")
+        st.divider()
+
+        # Frame rate
+        st.markdown("### 🎞️ Frame Rate (T)")
+        T = st.select_slider(
+            "Frames per clip",
+            options=FRAME_RATES,
+            value=10,
+            label_visibility='collapsed'
+        )
+        lat, f1, desc = FRAME_GUIDE[T]
+        st.info(
+            f"**T = {T} frames**\n\n"
+            f"Latency: `{lat}`\n\n"
+            f"F1 Score: `{f1}`\n\n"
+            f"{desc}"
+        )
+
+        st.divider()
+
+        # Metadata
+        st.markdown("### 📋 Contextual Metadata")
+        compression = st.selectbox(
+            "Compression level",
+            ['raw', 'c23', 'c40'],
+            index=1
+        )
+        source_type = st.selectbox(
+            "Video source type",
+            ['youtube', 'actors'],
+            index=0
+        )
+
+        st.divider()
+
+        # Frame rate guide table
+        st.markdown("### 📊 Performance Guide")
+        if PANDAS_AVAILABLE:
+            import pandas as pd
+            guide_df = pd.DataFrame({
+                'T':       [5, 10, 15, 20],
+                'F1':      [0.694, 0.727, 0.735, 0.731],
+                'ms':      ['4.8', '9.6', '14.2', '18.8'],
+                'FNR':     ['28.7%', '23.3%', '22.7%', '22.7%']
+            }).set_index('T')
+            st.dataframe(
+                guide_df,
+                use_container_width=True
+            )
+        else:
+            st.code(
+                "T=5   F1=0.694  4.8ms\n"
+                "T=10  F1=0.727  9.6ms\n"
+                "T=15  F1=0.735 14.2ms ★\n"
+                "T=20  F1=0.731 18.8ms"
+            )
+
+        st.caption(
+            "★ = Recommended  |  FNR = False Negative Rate"
+        )
+
+    return {
+        'T':           T,
+        'compression': compression,
+        'source_type': source_type
+    }
+
+
+# ==============================================================
+# MAIN APP
 # ==============================================================
 
 def main():
 
-    # Load model once
-    model, device, model_loaded = load_model()
+    # ---- Load model ----
+    model, device, model_loaded, model_msg = load_model()
 
-    # ==============================================================
-    # HEADER
-    # ==============================================================
+    # ---- Sidebar ----
+    config = build_sidebar()
+    T           = config['T']
+    compression = config['compression']
+    source_type = config['source_type']
 
-    col_title, col_status = st.columns([3, 1])
+    # ---- Header ----
+    st.markdown("# 🎭 HCI Deepfake Detector")
+    st.markdown(
+        "Real-time deepfake detection using a hybrid "
+        "**CNN+LSTM** architecture.  "
+        "Upload a video, choose a frame rate, "
+        "and click **Run Detection**."
+    )
 
-    with col_title:
-        st.markdown(
-            "# 🎭 HCI Deepfake Detector"
+    # System status banner
+    if model_loaded:
+        st.success(
+            f"✅ {model_msg}  |  "
+            f"Device: {str(device).upper()}"
         )
-        st.markdown(
-            "Real-time deepfake detection using a "
-            "hybrid **CNN+LSTM** architecture trained on "
-            "FaceForensics++. "
-            "Select a video, choose your frame rate, "
-            "and run detection."
+    else:
+        st.warning(
+            f"⚠️ Demo Mode — {model_msg}  "
+            f"Results are randomized for demonstration."
         )
 
-    with col_status:
-        st.markdown("**System Status**")
-        if model_loaded:
-            st.success(
-                f"Model ready\n\n"
-                f"Device: {str(device).upper()}"
-            )
-        else:
-            st.warning(
-                "Demo mode\n\n"
-                "Model file not found\n"
-                "(random predictions)"
-            )
+    # Dependency warnings
+    if not CV2_AVAILABLE:
+        st.error(
+            "OpenCV not available. "
+            "Frame extraction disabled. "
+            "Check requirements.txt and packages.txt."
+        )
+    if not TORCH_AVAILABLE:
+        st.error(
+            "PyTorch not available. "
+            "Check requirements.txt — ensure CPU build URL "
+            "is included."
+        )
 
     st.divider()
 
-    # ==============================================================
-    # MAIN LAYOUT: Left controls, Right results
-    # ==============================================================
+    # ---- File Upload ----
+    uploaded = st.file_uploader(
+        "📂 Upload Video File",
+        type=['mp4', 'avi', 'mov', 'mkv', 'webm'],
+        help="Maximum file size: 200MB"
+    )
 
-    left_col, right_col = st.columns([1, 1.4])
-
-    # ----------------------------------------------------------
-    # LEFT COLUMN — Controls
-    # ----------------------------------------------------------
-
-    with left_col:
-
-        # ---- Video Upload ----
-        st.subheader("📂 Upload Video")
-        uploaded = st.file_uploader(
-            "Choose a video file",
-            type=['mp4', 'avi', 'mov', 'mkv'],
-            help="Supported formats: MP4, AVI, MOV, MKV"
-        )
-
-        # ---- Frame Rate Selection ----
-        st.subheader("🎞️ Frame Rate (T)")
-
-        T = st.radio(
-            "Frames per clip",
-            options=FRAME_RATES,
-            index=1,    # Default T=10
-            horizontal=True,
-            help="Higher T = better accuracy, higher latency"
-        )
-
-        lat, f1, desc = FRAME_GUIDE[T]
-        st.info(
-            f"**T = {T}**  \n"
-            f"Latency: {lat}  |  F1: {f1}  \n"
-            f"{desc}"
-        )
-
-        # ---- Metadata (Optional) ----
-        with st.expander(
-            "⚙️ Contextual Metadata (optional)",
-            expanded=False
-        ):
-            compression = st.selectbox(
-                "Compression level",
-                options=['raw', 'c23', 'c40'],
-                index=1
+    if uploaded is not None:
+        col_info1, col_info2, col_info3 = st.columns(3)
+        with col_info1:
+            st.metric("File", uploaded.name[:25])
+        with col_info2:
+            st.metric(
+                "Size",
+                f"{uploaded.size / (1024*1024):.1f} MB"
             )
-            source_type = st.selectbox(
-                "Video source type",
-                options=['youtube', 'actors'],
-                index=0
-            )
-            st.caption(
-                "Metadata helps the model calibrate "
-                "detection for different compression levels."
-            )
+        with col_info3:
+            st.metric("Frame Rate (T)", T)
 
-        # ---- Detect Button ----
-        st.markdown("")
-        detect_btn = st.button(
-            "▶  RUN DETECTION",
-            disabled=(uploaded is None),
-            use_container_width=True
-        )
+    # ---- Detect Button ----
+    detect = st.button(
+        "▶  RUN DETECTION",
+        disabled=(uploaded is None),
+        use_container_width=True
+    )
 
-        # ---- Frame Rate Guide ----
-        st.subheader("📊 Frame Rate Guide")
-        guide_data = {
-            'T': [5, 10, 15, 20],
-            'F1 Score': [0.694, 0.727, 0.735, 0.731],
-            'Latency': ['4.8ms', '9.6ms',
-                        '14.2ms ★', '18.8ms'],
-            'FNR': ['28.7%', '23.3%',
-                    '22.7%', '22.7%']
-        }
-        import pandas as pd
-        df_guide = pd.DataFrame(guide_data)
-        df_guide = df_guide.set_index('T')
-        st.dataframe(
-            df_guide,
-            use_container_width=True
-        )
-        st.caption(
-            "FNR = False Negative Rate.  "
-            "★ = Recommended configuration."
-        )
+    st.divider()
 
-    # ----------------------------------------------------------
-    # RIGHT COLUMN — Results
-    # ----------------------------------------------------------
+    # ---- Results Area ----
+    col_result, col_frames = st.columns([1, 1.5])
 
-    with right_col:
+    with col_result:
+        st.subheader("🔍 Detection Result")
 
-        st.subheader("🔍 Detection Results")
-
-        # ---- Default state ----
-        if not detect_btn or uploaded is None:
+        if not detect or uploaded is None:
             st.markdown(
-                '<div class="result-box result-pending">'
+                '<div class="result-pending">'
                 '<h2 style="color:#9E9E9E">—</h2>'
                 '<p style="color:#9E9E9E">'
-                'Upload a video and click Run Detection'
-                '</p></div>',
+                'Awaiting video input</p></div>',
                 unsafe_allow_html=True
             )
-            st.markdown("")
-            st.subheader("🎬 Extracted Frames")
-            st.info(
-                "Frames from the uploaded video will "
-                "appear here after detection."
-            )
-            st.subheader("📋 Video Metadata")
-            st.info("Video information will appear here.")
-            return
+        else:
+            # Extract frames
+            with st.spinner(
+                f'Extracting {T} frames...'
+            ):
+                uploaded.seek(0)
+                if CV2_AVAILABLE and PIL_AVAILABLE:
+                    frames, meta = extract_frames_from_upload(
+                        uploaded, T
+                    )
+                else:
+                    frames = None
+                    meta   = None
 
-        # ---- Save uploaded file to temp location ----
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix='.mp4'
-        ) as tmp:
-            tmp.write(uploaded.read())
-            tmp_path = tmp.name
+            if frames is None and CV2_AVAILABLE:
+                st.error(
+                    "Could not extract frames from this file. "
+                    "Try a different video format."
+                )
+                return
 
-        # ---- Extract frames ----
-        with st.spinner(
-            f'Extracting {T} frames from video...'
-        ):
-            result = extract_frames(tmp_path, T)
-
-        if result is None:
-            st.error(
-                "Could not extract frames. "
-                "Please check the video file format."
-            )
-            os.unlink(tmp_path)
-            return
-
-        frames, meta = result
-
-        # ---- Run inference ----
-        with st.spinner('Running detection model...'):
-            meta_vec = build_metadata_vector(
-                compression, source_type
-            )
-            label, conf, latency = run_inference(
-                model, frames, device, T
-            )
-
-        os.unlink(tmp_path)
-
-        # ---- Display result ----
-        css_class = (
-            'result-fake' if label == 'FAKE'
-            else 'result-real'
-        )
-        icon  = '⚠️' if label == 'FAKE' else '✅'
-        color = '#B71C1C' if label == 'FAKE' else '#1B5E20'
-        pct   = int(conf * 100)
-
-        st.markdown(
-            f'<div class="result-box {css_class}">'
-            f'<h1 style="color:{color};margin:0">'
-            f'{icon} {label}</h1>'
-            f'<h3 style="color:{color};margin:5px 0">'
-            f'Confidence: {pct}%</h3>'
-            f'<p style="color:#666;margin:0">'
-            f'Latency: {latency:.1f}ms  |  '
-            f'T = {T} frames  |  '
-            f'Device: {str(device).upper()}</p>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-
-        # ---- Confidence bar ----
-        st.markdown("**Detection Confidence**")
-        bar_color = (
-            '#B71C1C' if label == 'FAKE'
-            else '#1B5E20'
-        )
-        st.markdown(
-            f"""
-            <div style="
-                background:#E0E0E0;
-                border-radius:8px;
-                height:28px;
-                position:relative;
-                margin:8px 0 4px 0;
-            ">
-              <div style="
-                background:{bar_color};
-                width:{pct}%;
-                height:100%;
-                border-radius:8px;
-                opacity:0.85;
-              "></div>
-              <div style="
-                position:absolute;
-                top:50%; left:50%;
-                transform:translate(-50%,-50%);
-                color:white;
-                font-weight:bold;
-                font-size:14px;
-              ">{pct}%</div>
-              <div style="
-                position:absolute;
-                top:50%; left:50%;
-                transform:translate(-50%,-50%)
-                translateX(-50%);
-                width:2px; height:100%;
-                background:white;
-                opacity:0.6;
-              "></div>
-            </div>
-            <div style="
-                display:flex;
-                justify-content:space-between;
-                font-size:11px; color:#666;
-            ">
-              <span>REAL (0%)</span>
-              <span>FAKE (100%)</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        # ---- Metric cards ----
-        st.markdown("")
-        m1, m2, m3, m4 = st.columns(4)
-        with m1:
-            st.metric("Result",    label)
-        with m2:
-            st.metric("Confidence", f"{pct}%")
-        with m3:
-            st.metric("Latency",   f"{latency:.1f}ms")
-        with m4:
-            st.metric("Frames",    f"T = {T}")
-
-        # ---- Extracted frames grid ----
-        st.subheader("🎬 Extracted Frames")
-        st.caption(
-            f"{len(frames)} frames extracted "
-            f"at evenly spaced intervals"
-        )
-
-        cols = st.columns(min(len(frames), 5))
-        for i, (col, frame) in enumerate(
-            zip(cols * (len(frames) // 5 + 1),
-                frames)
-        ):
-            with col:
-                st.image(
-                    frame,
-                    caption=f'Frame {i+1}',
-                    use_column_width=True
+            # Run inference
+            with st.spinner('Running detection model...'):
+                label, conf, latency, is_demo = run_inference(
+                    model, device,
+                    frames if frames else [],
+                    T
                 )
 
-        # ---- Video metadata ----
-        st.subheader("📋 Video Metadata")
-        meta_col1, meta_col2 = st.columns(2)
+            pct       = int(conf * 100)
+            css_class = (
+                'result-fake' if label == 'FAKE'
+                else 'result-real'
+            )
+            icon  = '⚠️' if label == 'FAKE' else '✅'
+            color = (
+                '#B71C1C' if label == 'FAKE'
+                else '#1B5E20'
+            )
+            demo_note = ' (demo)' if is_demo else ''
 
-        with meta_col1:
-            st.markdown(f"**File:** {uploaded.name}")
+            # Result box
             st.markdown(
-                f"**Resolution:** {meta['resolution']}"
-            )
-            st.markdown(
-                f"**FPS:** {meta['fps']}"
-            )
-
-        with meta_col2:
-            st.markdown(
-                f"**Duration:** {meta['duration_s']}s"
-            )
-            st.markdown(
-                f"**Total Frames:** {meta['total_frames']}"
-            )
-            st.markdown(
-                f"**File Size:** {meta['file_size_mb']} MB"
+                f'<div class="result-box {css_class}">'
+                f'<h1 style="color:{color};margin:0">'
+                f'{icon} {label}</h1>'
+                f'<h3 style="color:{color};margin:5px 0">'
+                f'Confidence: {pct}%{demo_note}</h3>'
+                f'<p style="color:#666;margin:0">'
+                f'T={T} frames  |  '
+                f'{latency:.1f}ms latency</p>'
+                f'</div>',
+                unsafe_allow_html=True
             )
 
-    # ==============================================================
-    # ABOUT SECTION
-    # ==============================================================
+            # Confidence bar
+            st.markdown("**Confidence Visualization**")
+            bar_color = (
+                '#B71C1C' if label == 'FAKE'
+                else '#1B5E20'
+            )
+            st.markdown(
+                f"""
+                <div style="
+                    background:#E0E0E0;
+                    border-radius:8px;
+                    height:32px;
+                    position:relative;
+                    margin:8px 0 4px 0;
+                ">
+                  <div style="
+                    background:{bar_color};
+                    width:{pct}%;
+                    height:100%;
+                    border-radius:8px;
+                    opacity:0.82;
+                  "></div>
+                  <div style="
+                    position:absolute;
+                    top:50%; left:50%;
+                    transform:translate(-50%,-50%);
+                    color:white;
+                    font-weight:bold;
+                    font-size:15px;
+                  ">{pct}%</div>
+                </div>
+                <div style="
+                    display:flex;
+                    justify-content:space-between;
+                    font-size:11px; color:#888;
+                    margin-bottom:12px;
+                ">
+                  <span>REAL ← 0%</span>
+                  <span>50% threshold</span>
+                  <span>100% → FAKE</span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
+            # Metric row
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("Result", label)
+            with m2:
+                st.metric("Confidence", f"{pct}%")
+            with m3:
+                if latency > 0:
+                    st.metric("Latency", f"{latency:.1f}ms")
+                else:
+                    st.metric("Mode", "Demo")
+
+            # Video metadata
+            if meta:
+                st.subheader("📋 Video Info")
+                vm1, vm2 = st.columns(2)
+                with vm1:
+                    st.markdown(
+                        f"**Resolution:** {meta['resolution']}"
+                    )
+                    st.markdown(
+                        f"**FPS:** {meta['fps']}"
+                    )
+                    st.markdown(
+                        f"**Duration:** {meta['duration_s']}s"
+                    )
+                with vm2:
+                    st.markdown(
+                        f"**Total frames:** {meta['total_frames']}"
+                    )
+                    st.markdown(
+                        f"**File size:** {meta['file_size_mb']} MB"
+                    )
+                    st.markdown(
+                        f"**Frames extracted:** {T}"
+                    )
+
+    # ---- Frames display ----
+    with col_frames:
+        st.subheader("🎬 Extracted Frames")
+
+        if not detect or uploaded is None:
+            st.info(
+                "Extracted frames will appear here "
+                "after running detection."
+            )
+        elif frames and PIL_AVAILABLE:
+            n_per_row = 5
+            rows = [
+                frames[i:i + n_per_row]
+                for i in range(0, len(frames), n_per_row)
+            ]
+            for row in rows:
+                cols = st.columns(len(row))
+                for col, frame, idx in zip(
+                    cols,
+                    row,
+                    range(len(frames))
+                ):
+                    with col:
+                        st.image(
+                            frame,
+                            caption=f'F{idx+1}',
+                            use_column_width=True
+                        )
+        else:
+            st.warning(
+                "Frame display requires OpenCV and PIL. "
+                "Detection still ran in demo mode."
+            )
+
+    # ---- About expander ----
     st.divider()
     with st.expander("ℹ️ About This Application"):
         st.markdown("""
         ### HCI Deepfake Detection — COS590 Final Project
 
-        This application implements a hybrid
-        **CNN+LSTM architecture** for real-time
-        deepfake detection in video streams,
-        developed as the final project for the
-        Human-Computer Interaction course at
-        Full Sail University.
+        Developed for the Human-Computer Interaction
+        course at Full Sail University.
 
-        **Architecture:**
-        - CNN Backbone: MobileNetV2
-          (pretrained on ImageNet)
-        - Temporal Modeling: Bidirectional LSTM
-          (hidden=256, bidirectional)
-        - Dataset: FaceForensics++ c23
-          (500 real + 500 fake videos)
+        **Model Architecture:**
+        - CNN Backbone: MobileNetV2 (ImageNet pretrained)
+        - Temporal Model: Bidirectional LSTM
+          (hidden=256)
+        - Input: T evenly spaced frames per video clip
+        - Output: Binary classification (REAL / FAKE)
 
-        **Key Results:**
-        | Configuration | F1 Score | Latency |
-        |---|---|---|
-        | T=5  frames | 0.694 | 4.8ms  |
-        | T=10 frames | 0.727 | 9.6ms  |
-        | T=15 frames | 0.735 | 14.2ms |
-        | T=20 frames | 0.731 | 18.8ms |
+        **Dataset:** FaceForensics++ c23
+        (500 real + 500 fake video clips)
+
+        **Key Results (test set):**
+
+        | T | F1 | Latency | FNR |
+        |---|---|---|---|
+        | 5  | 0.694 | 4.8ms  | 28.7% |
+        | 10 | 0.727 | 9.6ms  | 23.3% |
+        | 15 | 0.735 | 14.2ms | 22.7% ★ |
+        | 20 | 0.731 | 18.8ms | 22.7% |
+
+        ★ Recommended configuration.
 
         **References:**
-        - Rossler et al. (2019). FaceForensics++.
-          ICCV.
-        - Sandler et al. (2018). MobileNetV2.
-          CVPR.
-        - Masood et al. (2023). Deepfakes
-          generation and detection. Applied
-          Intelligence.
+        - Rossler et al. (2019). FaceForensics++. ICCV.
+        - Sandler et al. (2018). MobileNetV2. CVPR.
+        - Masood et al. (2023). Applied Intelligence.
         """)
 
 
