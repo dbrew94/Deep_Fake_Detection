@@ -47,7 +47,7 @@ except ImportError:
 FRAME_RATES     = [5, 10, 15, 20]
 DEFAULT_T       = 10
 IMG_SIZE        = 224
-MODEL_PATH      = 'models/cnn_lstm_best.pth'
+MODEL_PATH      = 'cnn_lstm_best.pth'
 WINDOW_TITLE    = 'HCI Deepfake Detector — COS640 Prototype'
 WINDOW_W        = 820
 WINDOW_H        = 640
