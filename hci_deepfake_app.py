@@ -1,7 +1,7 @@
 # hci_deepfake_app.py
 """
 HCI Deepfake Detection — Streamlit Web Application
-COS590 Final Project — Full Sail University
+COS640 Final Project — Full Sail University
 
 Deploy locally:   streamlit run hci_deepfake_app.py
 Deploy to cloud:  push to GitHub then connect to share.streamlit.io
@@ -13,7 +13,7 @@ even if PyTorch or OpenCV are not yet installed on the server.
 # hci_deepfake_app.py
 """
 HCI Deepfake Detection — Streamlit Web Application
-COS590 Final Project — Full Sail University
+COS640 Project — Full Sail University
 
 Run locally:   streamlit run hci_deepfake_app.py
 """
@@ -359,7 +359,8 @@ def sidebar():
     with st.sidebar:
         st.markdown("## HCI Deepfake Detector")
         st.markdown(
-            "*COS590 — Full Sail University*"
+            "*COS640 — Full Sail University*"
+            "*Dylan Brewington*"
         )
         st.divider()
 
