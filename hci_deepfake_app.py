@@ -187,33 +187,41 @@ else:
 # ── Model loading ────────────────────────────────────────────
 @st.cache_resource
 def load_model():
+    """
+    Load CNN+LSTM model from models/ folder in the repo.
+    No Hugging Face download needed since files are
+    small enough to commit directly to GitHub.
+    """
     if not TORCH_AVAILABLE:
-        return None, None, False, "PyTorch not installed"
+        return (
+            None, None, False,
+            "PyTorch not installed — demo mode"
+        )
 
     device = torch.device("cpu")
 
+    # Import model class
     try:
         sys.path.insert(
-            0, os.path.dirname(os.path.abspath(__file__))
+            0,
+            os.path.dirname(os.path.abspath(__file__))
         )
         from src.model import CNNLSTMModel
     except ImportError as e:
-        return None, device, False, f"Import error: {e}"
+        return (
+            None, device, False,
+            f"Could not import CNNLSTMModel: {e}"
+        )
 
+    # Check model file exists
     if not os.path.exists(MODEL_PATH):
-        try:
-            from huggingface_hub import hf_hub_download
-            os.makedirs("models", exist_ok=True)
-            hf_hub_download(
-                repo_id="YOUR_HF_USERNAME/deepfake-detection",
-                filename="cnn_lstm_best.pth",
-                local_dir="models",
-            )
-        except Exception as e:
-            return None, device, False, (
-                f"Model not found — download failed: {e}"
-            )
+        return (
+            None, device, False,
+            f"Model file not found at {MODEL_PATH}. "
+            f"Make sure models/ folder was pushed to GitHub."
+        )
 
+    # Load weights
     try:
         model = CNNLSTMModel(
             sequence_length=10,
@@ -221,12 +229,24 @@ def load_model():
             num_layers=1,
             bidirectional=True,
         ).to(device)
-        state = torch.load(MODEL_PATH, map_location=device)
+
+        state = torch.load(
+            MODEL_PATH, map_location=device
+        )
         model.load_state_dict(state)
         model.eval()
-        return model, device, True, "Model ready"
+
+        size_mb = os.path.getsize(MODEL_PATH) / (1024*1024)
+        return (
+            model, device, True,
+            f"Model loaded ({size_mb:.1f} MB) — CPU"
+        )
+
     except Exception as e:
-        return None, device, False, f"Load error: {e}"
+        return (
+            None, device, False,
+            f"Weight loading error: {e}"
+        )
 
 
 # ── Frame extraction ─────────────────────────────────────────
