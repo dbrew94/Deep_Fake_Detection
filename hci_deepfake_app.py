@@ -656,8 +656,8 @@ def main():
     st.markdown(
         '<p class="footer-text">'
         "HCI Deepfake Detector &nbsp;|&nbsp; "
-        "COS590 Human-Computer Interaction &nbsp;|&nbsp; "
-        "Full Sail University &nbsp;|&nbsp; "
+        "COS640 Human-Computer Interaction &nbsp;|&nbsp; "
+        "Dylan Brewington - Full Sail University, Master of Computer Science Program. &nbsp;|&nbsp; "
         "Streamlit + PyTorch + MobileNetV2"
         "</p>",
         unsafe_allow_html=True,
