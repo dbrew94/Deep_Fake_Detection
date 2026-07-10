@@ -359,7 +359,7 @@ def sidebar():
     with st.sidebar:
         st.markdown("## HCI Deepfake Detector")
         st.markdown(
-            "*COS640 — Full Sail University - Dylan Brewington*"
+            "*COS640 — Full Sail University — Dylan Brewington*"
         )
         st.divider()
 
