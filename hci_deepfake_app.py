@@ -20,8 +20,6 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
-    st.error("PyTorch not installed. Check requirements.txt.")
-    st.stop()
 
 try:
     import cv2
@@ -180,10 +178,14 @@ TRANSFORM = transforms.Compose([
 
 @st.cache_resource(show_spinner="Loading detection model…")
 def load_model():
-    """
-    Load the CNN+LSTM model from the models/ directory.
-    Cached so it only loads once per session.
-    """
+    if not TORCH_AVAILABLE:
+        st.error(
+            "PyTorch is still installing on the server.  \n"
+            "This usually takes 2-3 minutes on first deploy.  \n"
+            "Please wait a moment and refresh the page."
+        )
+        st.stop()
+
     device = torch.device("cpu")
 
     # Add project root to path so src.model can be found
