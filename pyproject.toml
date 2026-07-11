@@ -1,8 +1,0 @@
-[project]
-name = "deepfake-detection"
-version = "1.0.0"
-requires-python = ">=3.11"
-dependencies = []
-
-[tool.uv]
-extra-index-url = ["https://download.pytorch.org/whl/cpu"]
