@@ -5,12 +5,30 @@ COS640 Final Project — Full Sail University
 
 Run locally:   streamlit run hci_deepfake_app.py
 """
+import subprocess
+import sys
+
+def _ensure_torch():
+    try:
+        import torch
+        return
+    except ImportError:
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install",
+            "--quiet",
+            "--index-url",
+            "https://download.pytorch.org/whl/cpu",
+            "torch==2.1.0+cpu",
+            "torchvision==0.16.0+cpu",
+        ])
+
+_ensure_torch()
+# ─────────────────────────────────────────────────────────────
 
 import streamlit as st
 import numpy as np
 import time
 import os
-import sys
 import tempfile
 
 # ── Imports ──────────────────────────────────────────────────
