@@ -5,49 +5,81 @@ COS640 — Full Sail University
 
 Run locally:   streamlit run hci_deepfake_app.py
 """
-# hci_deepfake_app.py
-# ── Pre-install torch to user directory ──────────────────────
-# hci_deepfake_app.py
-# ── Pre-install torch to /tmp ─────────────────────────────────
+
 import subprocess
 import sys
 import os
 
-def _ensure_torch():
-    try:
-        import torch
-        return True, None
-    except ImportError:
-        pass
-
-    target = "/tmp/torch_packages"
+def _pip_install(packages, index_url=None):
+    """Install packages to /tmp/extra_packages."""
+    target = "/tmp/extra_packages"
     os.makedirs(target, exist_ok=True)
 
+    cmd = [
+        sys.executable, "-m", "pip", "install",
+        "--quiet",
+        "--target", target,
+    ]
+    if index_url:
+        cmd += ["--index-url", index_url]
+    cmd += packages
+
     result = subprocess.run(
-        [
-            sys.executable, "-m", "pip", "install",
-            "--quiet",
-            "--target", target,
-            "--index-url",
-            "https://download.pytorch.org/whl/cpu",
-            "torch==2.1.0+cpu",
-            "torchvision==0.16.0+cpu",
-        ],
-        capture_output=True,
-        text=True
+        cmd, capture_output=True, text=True
     )
+    return result.returncode, result.stderr
 
-    if result.returncode != 0:
-        return False, result.stderr
 
-    # Add /tmp/torch_packages to path so imports work
+def _ensure_packages():
+    """
+    Install all packages that uv skips.
+    Adds /tmp/extra_packages to sys.path so imports work.
+    """
+    target = "/tmp/extra_packages"
+    os.makedirs(target, exist_ok=True)
+
+    # Add target to path immediately so imports work after install
     if target not in sys.path:
         sys.path.insert(0, target)
 
-    return True, None
+    errors = {}
+
+    # ── Torch ────────────────────────────────────────────────
+    try:
+        import torch
+    except ImportError:
+        code, err = _pip_install(
+            ["torch==2.1.0+cpu", "torchvision==0.16.0+cpu"],
+            index_url="https://download.pytorch.org/whl/cpu"
+        )
+        if code != 0:
+            errors["torch"] = err
+
+    # ── OpenCV ───────────────────────────────────────────────
+    try:
+        import cv2
+    except ImportError:
+        code, err = _pip_install(
+            ["opencv-python-headless==4.8.1.78"]
+        )
+        if code != 0:
+            errors["opencv"] = err
+
+    # ── Matplotlib ───────────────────────────────────────────
+    try:
+        import matplotlib
+    except ImportError:
+        code, err = _pip_install(["matplotlib"])
+        if code != 0:
+            errors["matplotlib"] = err
+
+    return errors
 
 
-_torch_ok, _torch_err = _ensure_torch()
+_install_errors = _ensure_packages()
+# ─────────────────────────────────────────────────────────────
+
+
 # ─────────────────────────────────────────────────────────────
 
 
@@ -68,7 +100,7 @@ except ImportError as e:
     TORCH_AVAILABLE = False
     TORCH_ERROR = (
         f"Import error: {e}\n"
-        f"Pip error: {_torch_err or 'none'}"
+        f"Pip errors: {_install_errors}"
     )
 
 try:
@@ -301,8 +333,9 @@ def extract_frames(uploaded_file, num_frames):
     """
     if not CV2_AVAILABLE:
         st.error(
-            "OpenCV not available. "
-            "Check packages.txt and requirements.txt."
+            "OpenCV is still loading.  \n"
+            "Please wait 2 minutes and try again.  \n"
+            f"Install log: {_install_errors.get('opencv', 'no error recorded')}"
         )
         return None, None
 
