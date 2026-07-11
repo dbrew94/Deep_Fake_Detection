@@ -114,7 +114,11 @@ import sys
 import tempfile
 
 # ── Safe imports after pre-install ───────────────────────────
+# Define IMG_SIZE here before the torch import block
+IMG_SIZE = 224
+
 TORCH_ERROR = None
+TRANSFORM    = None
 try:
     import torch
     import torchvision.transforms as transforms
@@ -128,6 +132,10 @@ try:
             std=[0.229, 0.224, 0.225],
         ),
     ])
+
+except Exception as e:
+    TORCH_AVAILABLE = False
+    TORCH_ERROR = f"{type(e).__name__}: {e}"
 
 except Exception as e:
     TORCH_AVAILABLE = False
