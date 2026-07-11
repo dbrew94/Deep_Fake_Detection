@@ -6,15 +6,15 @@ COS640 — Full Sail University
 Run locally:   streamlit run hci_deepfake_app.py
 """
 
+# hci_deepfake_app.py
+# ── Pre-install packages that uv skips ───────────────────────
 import subprocess
 import sys
 import os
 
 def _pip_install(packages, index_url=None):
-    """Install packages to /tmp/extra_packages."""
     target = "/tmp/extra_packages"
     os.makedirs(target, exist_ok=True)
-
     cmd = [
         sys.executable, "-m", "pip", "install",
         "--quiet",
@@ -23,65 +23,76 @@ def _pip_install(packages, index_url=None):
     if index_url:
         cmd += ["--index-url", index_url]
     cmd += packages
-
     result = subprocess.run(
         cmd, capture_output=True, text=True
     )
     return result.returncode, result.stderr
 
 
+def _try_import(module_name):
+    """Try to import a module. Return (success, error_string)."""
+    try:
+        __import__(module_name)
+        return True, None
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 def _ensure_packages():
-    """
-    Install all packages that uv skips.
-    Adds /tmp/extra_packages to sys.path so imports work.
-    """
     target = "/tmp/extra_packages"
     os.makedirs(target, exist_ok=True)
 
-    # Add target to path immediately so imports work after install
     if target not in sys.path:
         sys.path.insert(0, target)
 
-    errors = {}
+    log = {}
 
     # ── Torch ────────────────────────────────────────────────
-    try:
-        import torch
-    except ImportError:
-        code, err = _pip_install(
+    ok, err = _try_import("torch")
+    if not ok:
+        log["torch_before"] = err
+        code, pip_err = _pip_install(
             ["torch==2.1.0+cpu", "torchvision==0.16.0+cpu"],
             index_url="https://download.pytorch.org/whl/cpu"
         )
-        if code != 0:
-            errors["torch"] = err
+        log["torch_pip_code"] = code
+        log["torch_pip_err"]  = pip_err or "none"
+        ok2, err2 = _try_import("torch")
+        log["torch_after"] = "ok" if ok2 else err2
 
     # ── OpenCV ───────────────────────────────────────────────
-    try:
-        import cv2
-    except ImportError:
-        code, err = _pip_install(
-            ["opencv-python-headless==4.8.1.78"]
+    ok, err = _try_import("cv2")
+    if not ok:
+        log["cv2_before"] = err
+        # Try headless first
+        code, pip_err = _pip_install(
+            ["opencv-python-headless"]
         )
-        if code != 0:
-            errors["opencv"] = err
+        log["cv2_pip_code"] = code
+        log["cv2_pip_err"]  = pip_err or "none"
+        ok2, err2 = _try_import("cv2")
+        log["cv2_after"] = "ok" if ok2 else err2
+
+        # If headless failed try the full version
+        if not ok2:
+            code2, pip_err2 = _pip_install(["opencv-python"])
+            log["cv2_full_pip_code"] = code2
+            log["cv2_full_pip_err"]  = pip_err2 or "none"
+            ok3, err3 = _try_import("cv2")
+            log["cv2_full_after"] = "ok" if ok3 else err3
 
     # ── Matplotlib ───────────────────────────────────────────
-    try:
-        import matplotlib
-    except ImportError:
-        code, err = _pip_install(["matplotlib"])
-        if code != 0:
-            errors["matplotlib"] = err
+    ok, err = _try_import("matplotlib")
+    if not ok:
+        code, pip_err = _pip_install(["matplotlib"])
+        log["mpl_pip_code"] = code
+        log["mpl_pip_err"]  = pip_err or "none"
 
-    return errors
+    return log
 
 
-_install_errors = _ensure_packages()
+_install_log = _ensure_packages()
 # ─────────────────────────────────────────────────────────────
-
-
-# ─────────────────────────────────────────────────────────────
-
 
 import streamlit as st
 import numpy as np
@@ -90,41 +101,40 @@ import os
 import sys
 import tempfile
 
-# ── Imports ──────────────────────────────────────────────────
+# ── Safe imports after pre-install ───────────────────────────
 TORCH_ERROR = None
 try:
     import torch
     import torchvision.transforms as transforms
     TORCH_AVAILABLE = True
-except ImportError as e:
+except Exception as e:
     TORCH_AVAILABLE = False
-    TORCH_ERROR = (
-        f"Import error: {e}\n"
-        f"Pip errors: {_install_errors}"
-    )
+    TORCH_ERROR = f"{type(e).__name__}: {e}"
 
 try:
     import cv2
     CV2_AVAILABLE = True
-except ImportError:
+    CV2_ERROR = None
+except Exception as e:
     CV2_AVAILABLE = False
+    CV2_ERROR = f"{type(e).__name__}: {e}"
 
 try:
     from PIL import Image
     PIL_AVAILABLE = True
-except ImportError:
+except Exception:
     PIL_AVAILABLE = False
 
 try:
     import pandas as pd
     PANDAS_AVAILABLE = True
-except ImportError:
+except Exception:
     PANDAS_AVAILABLE = False
 
 try:
     import matplotlib.pyplot as plt
     MPL_AVAILABLE = True
-except ImportError:
+except Exception:
     MPL_AVAILABLE = False
 
 # ── Page config ───────────────────────────────────────────────
@@ -332,10 +342,14 @@ def extract_frames(uploaded_file, num_frames):
     or raises an error via st.error and returns (None, None).
     """
     if not CV2_AVAILABLE:
-        st.error(
-            "OpenCV is still loading.  \n"
-            "Please wait 2 minutes and try again.  \n"
-            f"Install log: {_install_errors.get('opencv', 'no error recorded')}"
+        st.error("OpenCV failed to load.")
+        st.code(
+            f"CV2 import error: {CV2_ERROR}\n\n"
+            f"Install log:\n"
+            + "\n".join(
+                f"  {k}: {v}"
+                for k, v in _install_log.items()
+            )
         )
         return None, None
 
