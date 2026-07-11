@@ -720,7 +720,6 @@ def build_sidebar(size_mb):
             "- **Parameters:** ~5.4M  \n"
             "- **Dataset:** FaceForensics++ c23  \n"
             "- **Best F1:** 0.735 at T=15  \n"
-            "- **Hypothesis:** VALIDATED ✓"
         )
 
     return T, compression, source
