@@ -47,12 +47,26 @@ def _ensure_packages():
 
     log = {}
 
-    # ── Torch ────────────────────────────────────────────────
-    ok, err = _try_import("torch")
-    if not ok:
-        log["torch_before"] = err
+    # ── Torch — check version, reinstall if wrong ────────────
+    needs_torch = False
+    try:
+        import torch
+        # Check we have a numpy-2.x compatible version
+        major = int(torch.__version__.split(".")[0])
+        minor = int(torch.__version__.split(".")[1].split("+")[0])
+        if major < 2 or (major == 2 and minor < 3):
+            needs_torch = True
+            log["torch_reason"] = (
+                f"Upgrading from {torch.__version__} "
+                f"to 2.3.0 for numpy 2.x compatibility"
+            )
+    except ImportError:
+        needs_torch = True
+        log["torch_reason"] = "not installed"
+
+    if needs_torch:
         code, pip_err = _pip_install(
-            ["torch==2.1.0+cpu", "torchvision==0.16.0+cpu"],
+            ["torch==2.3.0+cpu", "torchvision==0.18.0+cpu"],
             index_url="https://download.pytorch.org/whl/cpu"
         )
         log["torch_pip_code"] = code
@@ -64,7 +78,6 @@ def _ensure_packages():
     ok, err = _try_import("cv2")
     if not ok:
         log["cv2_before"] = err
-        # Try headless first
         code, pip_err = _pip_install(
             ["opencv-python-headless"]
         )
@@ -73,7 +86,6 @@ def _ensure_packages():
         ok2, err2 = _try_import("cv2")
         log["cv2_after"] = "ok" if ok2 else err2
 
-        # If headless failed try the full version
         if not ok2:
             code2, pip_err2 = _pip_install(["opencv-python"])
             log["cv2_full_pip_code"] = code2
@@ -107,9 +119,20 @@ try:
     import torch
     import torchvision.transforms as transforms
     TORCH_AVAILABLE = True
+
+    TRANSFORM = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225],
+        ),
+    ])
+
 except Exception as e:
     TORCH_AVAILABLE = False
     TORCH_ERROR = f"{type(e).__name__}: {e}"
+    TRANSFORM = None
 
 try:
     import cv2
@@ -449,6 +472,17 @@ def extract_frames(uploaded_file, num_frames):
 # ════════════════════════════════════════════════════════════════
 
 def run_inference(model, device, frames, T):
+    if model is None or not TORCH_AVAILABLE or not frames:
+        return "REAL", 0.1, 0.0
+
+    if TRANSFORM is None:
+        st.error(
+            "Transform pipeline not initialized.  \n"
+            "This usually means torchvision failed to load.  \n"
+            f"torch available: {TORCH_AVAILABLE}  \n"
+            f"Install log: {_install_log}"
+        )
+        st.stop()
     """
     Run CNN+LSTM deepfake detection.
 
