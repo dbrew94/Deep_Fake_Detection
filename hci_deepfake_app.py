@@ -1,34 +1,65 @@
 # hci_deepfake_app.py
 """
 HCI Deepfake Detection — Streamlit Web Application
-COS640 Final Project — Full Sail University
+COS640 — Full Sail University
 
 Run locally:   streamlit run hci_deepfake_app.py
 """
+# hci_deepfake_app.py
+# ── Pre-install torch to user directory ──────────────────────
 import subprocess
 import sys
+import site
+import os
 
 def _ensure_torch():
     try:
         import torch
-        return
+        return True
     except ImportError:
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install",
-            "--quiet",
-            "--index-url",
-            "https://download.pytorch.org/whl/cpu",
-            "torch==2.1.0+cpu",
-            "torchvision==0.16.0+cpu",
-        ])
+        pass
 
-_ensure_torch()
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "pip", "install",
+                "--quiet",
+                "--user",
+                "--index-url",
+                "https://download.pytorch.org/whl/cpu",
+                "torch==2.1.0+cpu",
+                "torchvision==0.16.0+cpu",
+            ],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            # Write error to a temp file so we can read it later
+            with open("/tmp/torch_install_error.txt", "w") as f:
+                f.write(result.stderr)
+            return False
+
+        # Add user site-packages to path so torch is importable
+        user_site = site.getusersitepackages()
+        if user_site not in sys.path:
+            sys.path.insert(0, user_site)
+
+        return True
+
+    except Exception as e:
+        with open("/tmp/torch_install_error.txt", "w") as f:
+            f.write(str(e))
+        return False
+
+_torch_installed = _ensure_torch()
 # ─────────────────────────────────────────────────────────────
 
 import streamlit as st
 import numpy as np
 import time
 import os
+import sys
 import tempfile
 
 # ── Imports ──────────────────────────────────────────────────
@@ -37,9 +68,15 @@ try:
     import torch
     import torchvision.transforms as transforms
     TORCH_AVAILABLE = True
-except Exception as e:
+except ImportError as e:
     TORCH_AVAILABLE = False
     TORCH_ERROR = str(e)
+    # Read install error if it exists
+    try:
+        with open("/tmp/torch_install_error.txt", "r") as f:
+            TORCH_ERROR = f.read()
+    except Exception:
+        pass
 
 try:
     import cv2
@@ -202,16 +239,10 @@ else:
 @st.cache_resource(show_spinner="Loading detection model…")
 def load_model():
     if not TORCH_AVAILABLE:
-        import sys
-        st.error("PyTorch failed to import.")
+        st.error("PyTorch could not be loaded.")
         st.code(
-            f"Python version:  {sys.version}\n"
-            f"Python path:     {sys.executable}\n"
-            f"Import error:    {TORCH_ERROR}"
-        )
-        st.markdown(
-            "**Paste the error above here so it "
-            "can be diagnosed.**"
+            f"Python: {sys.version}\n"
+            f"Error: {TORCH_ERROR}"
         )
         st.stop()
 
