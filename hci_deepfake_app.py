@@ -7,53 +7,49 @@ Run locally:   streamlit run hci_deepfake_app.py
 """
 # hci_deepfake_app.py
 # ── Pre-install torch to user directory ──────────────────────
+# hci_deepfake_app.py
+# ── Pre-install torch to /tmp ─────────────────────────────────
 import subprocess
 import sys
-import site
 import os
 
 def _ensure_torch():
     try:
         import torch
-        return True
+        return True, None
     except ImportError:
         pass
 
-    try:
-        result = subprocess.run(
-            [
-                sys.executable, "-m", "pip", "install",
-                "--quiet",
-                "--user",
-                "--index-url",
-                "https://download.pytorch.org/whl/cpu",
-                "torch==2.1.0+cpu",
-                "torchvision==0.16.0+cpu",
-            ],
-            capture_output=True,
-            text=True
-        )
+    target = "/tmp/torch_packages"
+    os.makedirs(target, exist_ok=True)
 
-        if result.returncode != 0:
-            # Write error to a temp file so we can read it later
-            with open("/tmp/torch_install_error.txt", "w") as f:
-                f.write(result.stderr)
-            return False
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "pip", "install",
+            "--quiet",
+            "--target", target,
+            "--index-url",
+            "https://download.pytorch.org/whl/cpu",
+            "torch==2.1.0+cpu",
+            "torchvision==0.16.0+cpu",
+        ],
+        capture_output=True,
+        text=True
+    )
 
-        # Add user site-packages to path so torch is importable
-        user_site = site.getusersitepackages()
-        if user_site not in sys.path:
-            sys.path.insert(0, user_site)
+    if result.returncode != 0:
+        return False, result.stderr
 
-        return True
+    # Add /tmp/torch_packages to path so imports work
+    if target not in sys.path:
+        sys.path.insert(0, target)
 
-    except Exception as e:
-        with open("/tmp/torch_install_error.txt", "w") as f:
-            f.write(str(e))
-        return False
+    return True, None
 
-_torch_installed = _ensure_torch()
+
+_torch_ok, _torch_err = _ensure_torch()
 # ─────────────────────────────────────────────────────────────
+
 
 import streamlit as st
 import numpy as np
@@ -70,13 +66,10 @@ try:
     TORCH_AVAILABLE = True
 except ImportError as e:
     TORCH_AVAILABLE = False
-    TORCH_ERROR = str(e)
-    # Read install error if it exists
-    try:
-        with open("/tmp/torch_install_error.txt", "r") as f:
-            TORCH_ERROR = f.read()
-    except Exception:
-        pass
+    TORCH_ERROR = (
+        f"Import error: {e}\n"
+        f"Pip error: {_torch_err or 'none'}"
+    )
 
 try:
     import cv2
@@ -242,7 +235,7 @@ def load_model():
         st.error("PyTorch could not be loaded.")
         st.code(
             f"Python: {sys.version}\n"
-            f"Error: {TORCH_ERROR}"
+            f"Error:  {TORCH_ERROR}"
         )
         st.stop()
 
