@@ -1,2 +1,9 @@
 [server]
+maxUploadSize = 10
 headless = true
+
+[runner]
+magicEnabled = false
+
+[browser]
+gatherUsageStats = false
