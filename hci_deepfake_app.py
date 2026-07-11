@@ -14,12 +14,14 @@ import sys
 import tempfile
 
 # ── Imports ──────────────────────────────────────────────────
+TORCH_ERROR = None
 try:
     import torch
     import torchvision.transforms as transforms
     TORCH_AVAILABLE = True
-except ImportError:
+except Exception as e:
     TORCH_AVAILABLE = False
+    TORCH_ERROR = str(e)
 
 try:
     import cv2
@@ -182,10 +184,16 @@ else:
 @st.cache_resource(show_spinner="Loading detection model…")
 def load_model():
     if not TORCH_AVAILABLE:
-        st.error(
-            "PyTorch is still installing on the server.  \n"
-            "This usually takes 2-3 minutes on first deploy.  \n"
-            "Please wait a moment and refresh the page."
+        import sys
+        st.error("PyTorch failed to import.")
+        st.code(
+            f"Python version:  {sys.version}\n"
+            f"Python path:     {sys.executable}\n"
+            f"Import error:    {TORCH_ERROR}"
+        )
+        st.markdown(
+            "**Paste the error above here so it "
+            "can be diagnosed.**"
         )
         st.stop()
 
