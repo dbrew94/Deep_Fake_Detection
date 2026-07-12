@@ -702,7 +702,7 @@ def build_sidebar(size_mb):
                     [5, 10, 15, 20], name="T"
                 ),
             )
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width=True)
         st.caption(
             "★ = recommended configuration  \n"
             "FNR = False Negative Rate  \n"
@@ -852,7 +852,7 @@ def main():
     run_btn = st.button(
         "Run Detection",
         disabled=(uploaded is None),
-        use_container_width=True,
+        width=True,
     )
     st.divider()
 
@@ -1062,7 +1062,7 @@ def main():
                     ),
                 )
                 st.dataframe(
-                    df, use_container_width=True
+                    df, width=True
                 )
                 st.caption(
                     "FNR = False Negative Rate  |  "
